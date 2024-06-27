@@ -308,9 +308,6 @@ workflow {
 
     // Ensure modbase threads are set if calling them
     if (params.remora_cfg || params.remora_model_path) {
-        if (params.duplex) {
-            throw new Exception(colors.red + "--duplex cannot call modified bases.\nUnset --remora_cfg/--remora_model_path to run duplex basecalling, or unset --duplex to run simplex modified basecalling." + colors.reset)
-        }
         if (params.basecaller_basemod_threads == 0) {
             throw new Exception(colors.red + "--remora_cfg modbase aware config requires setting --basecaller_basemod_threads > 0" + colors.reset)
         }
@@ -336,6 +333,7 @@ workflow {
         "output_bam": params.output_bam,
         "dorado_ext": params.dorado_ext,
         "fastq_only": params.fastq_only,
+        "poly_a_config": params.poly_a_config
     ])
     software_versions = getVersions()
     workflow_params = getParams()

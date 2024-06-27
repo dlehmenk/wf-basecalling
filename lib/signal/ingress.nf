@@ -25,12 +25,14 @@ Map parse_arguments(Map arguments) {
             "watch_path": false,
             "dorado_ext": "pod5",
             "output_bam": false,
-            "fastq_only": false
+            "fastq_only": false,
+            "poly_a_config": null,
         ],
         name: "signal_ingress")
     return parser.parse_args(arguments)
 }
 
+//TODO think about trimming
 process dorado {
     label "wf_dorado"
     label "wf_basecalling"
@@ -43,15 +45,20 @@ process dorado {
         tuple val(chunk_idx), path('*')
         tuple val(basecaller_cfg), path("dorado_model"), val(basecaller_model_override)
         tuple val(remora_cfg), path("remora_model"), val(remora_model_override)
+        val do_estimate_poly_a
+        path poly_a_config
     output:
         path("${chunk_idx}.ubam"), emit: ubams
         path("converted/*.pod5"), emit: converted_pod5s, optional: true
     script:
     def remora_model = remora_model_override ? "remora_model" : "\${DRD_MODELS_PATH}/${remora_cfg}"
-    def remora_args = (params.basecaller_basemod_threads > 0 && (params.remora_cfg || remora_model_override)) && !params.duplex ? "--modified-bases-models ${remora_model}" : ''
+    def remora_args = (params.basecaller_basemod_threads > 0 && (params.remora_cfg || remora_model_override)) ? "--modified-bases-models ${remora_model}" : ''
     def model_arg = basecaller_model_override ? "dorado_model" : "\${DRD_MODELS_PATH}/${basecaller_cfg}"
     def basecaller_args = params.basecaller_args ?: ''
+    def poly_a_args = do_estimate_poly_a ? "--estimate-poly-a --poly-a-config ${poly_a_config}": ''
     def caller = params.duplex ? "duplex" : "basecaller"
+    def barcode_kit_args = params.barcode_kit ? "--kit-name ${params.barcode_kit}": ''
+    def demux_args = params.demux_args ?: ''
     // CW-2569: delete pod5 is not required them to be emitted
     def signal_path = (params.duplex && params.dorado_ext == 'fast5') ? "converted/" : "."
     def delete_pod5s = !params.output_pod5 ? "rm -r converted/" : "echo 'No cleanup'"
@@ -72,6 +79,9 @@ process dorado {
         ${signal_path} \
         ${remora_args} \
         ${basecaller_args} \
+        ${poly_a_args} \
+        ${barcode_kit_args} \
+        ${demux_args} \
         --device ${params.cuda_device} | samtools view --no-PG -b -o ${chunk_idx}.ubam -
 
     # CW-2569: delete the pod5s, if emit not required.
@@ -220,6 +230,35 @@ process combine_dorado_summaries {
     '''
 }
 
+//if demuxing split the BAMS
+process split_calls {
+    label "wf_basecalling"
+    label "wf_dorado"
+    cpus 1
+    publishDir "${params.out_dir}/demuxed",
+        mode: 'copy',
+        pattern: "demuxed/*.bam",
+        saveAs: { fn ->
+            if (fn.endsWith("unclassified.bam")) {
+                "unclassified/reads.bam"
+            }
+            else if (fn.endsWith("mixed.bam")) {
+                "mixed/reads.bam"
+            }
+            else {
+                "${fn.replace("demuxed/${params.barcode_kit}_","").replace(".bam","")}/reads.bam"
+            }
+        }
+    input:
+        tuple path(cram), path(crai)
+    output:
+        path("demuxed/*.bam")
+    shell:
+    """
+    dorado demux --output-dir demuxed --no-classify ${cram}
+    """
+}
+
 
 workflow wf_dorado {
     take:
@@ -245,6 +284,15 @@ workflow wf_dorado {
         }
         else {
             ref = file("${projectDir}/data/OPTIONAL_FILE")
+        }
+        
+        // Deal with a Poly(A) configs. If config is present then turn on Poly(A) calling
+        Boolean do_estimate_poly_a = false
+        if (margs.poly_a_config ){
+            poly_a_config = file(margs.poly_a_config, checkIfExists: true)
+            do_estimate_poly_a = true
+        } else {
+            poly_a_config = file("${projectDir}/data/OPTIONAL_FILE")
         }
 
         // Munge models
@@ -362,7 +410,9 @@ workflow wf_dorado {
             called_bams = dorado(
                 ready_pod5_chunks,
                 tuple(margs.basecaller_model_name, basecaller_model, basecaller_model_override),
-                tuple(margs.remora_model_name, remora_model, remora_model_override)
+                tuple(margs.remora_model_name, remora_model, remora_model_override),
+                do_estimate_poly_a,
+                poly_a_config
             )
         }
 
@@ -398,10 +448,24 @@ workflow wf_dorado {
             pass = merge_pass_calls(ref, crams.pass.collect(), "pass", output_exts)
             fail = merge_fail_calls(ref, crams.fail.collect(), "fail", output_exts)
         }
+        if (params.barcode_kit) {
+            // this will output into the following structure
+            // output/demuxed/
+            // ├── barcode01
+            // │   └── reads.bam
+            // ├── barcode09
+            // │   └── reads.bam
+            // └── unclassified
+            //     └── reads.bam
+            barcode_bams = split_calls(pass)
+        } else {
+            barcode_bams = Channel.empty()
+        }
 
     emit:
         chunked_pass_crams = crams.pass
         pass = pass
+        barcode_bams = barcode_bams
         fail = fail
         output_exts = output_exts
         summary = summary

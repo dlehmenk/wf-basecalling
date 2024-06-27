@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.0]
+### Added
+- Modified base calling with `--duplex`.
+- APK 5.0.0 model.
+### Changed
+- Updated Dorado to v0.7.2 (see https://github.com/nanoporetech/dorado/releases/tag/v0.7.2)
+
+## [v1.2.2]
+### Changes
+- Bug fix for downstream workflows and `--poly_a_config` which does not affect normal workflow use.
+
+## [v1.2.1]
+### Added
+- Output channel for demuxed BAM files for downstream use.
+
+## [v1.2.0]
+### Added
+- Support for `dorado demux` to demultiplex barcoded runs. Specify your `--barcode_kit` to activate demultiplexing.
+- Support for poly(a) tail length estimation with `--poly_a_config`. You can configure by providng a TOML file to `--poly_a_config` which is described in detail [here](https://github.com/nanoporetech/dorado?tab=readme-ov-file#polya-tail-estimation)
+### Changed
+- Updated Dorado to v0.7.1 (see https://github.com/nanoporetech/dorado/releases/tag/v0.7.1)
+
 ## [v1.1.9]
 ### Fixed
 - Report crashing when no data are present in the input pod5.
